@@ -1,0 +1,52 @@
+[project]
+name = "open-meteo-etl"
+version = "0.1.0"
+description = "Open-Meteo to Databricks ETL (bronze / silver / gold)"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.setuptools]
+packages = ["open_meteo_etl"]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["open_meteo_etl"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+check_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
