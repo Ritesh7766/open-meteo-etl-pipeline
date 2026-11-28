@@ -1,0 +1,2087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Databricks H3 Spatial Nearest-Neighbor Join — Interactive 3D Earth Visualization</title>
+  <style>
+    /* ==========================================================================
+       1. DESIGN TOKENS & BASE RESET (Dark Space-Slate Theme #0b1120)
+       ========================================================================== */
+    :root {
+      --bg-canvas: #0b1120;
+      --bg-surface: #111827;
+      --bg-surface-elevated: #162033;
+      --bg-code: #090e1a;
+      --border-subtle: rgba(148, 163, 184, 0.16);
+      --border-strong: rgba(56, 189, 248, 0.35);
+
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --accent-cyan: #22d3ee;
+      --accent-sky: #38bdf8;
+      --accent-amber: #f59e0b;
+      --accent-gold: #fbbf24;
+      --accent-emerald: #10b981;
+      --accent-red: #f43f5e;
+      --accent-purple: #a78bfa;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --shadow-card: 0 18px 40px -15px rgba(0, 0, 0, 0.65);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      min-height: 100%;
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ==========================================================================
+       2. LAYOUT SHELL & HEADER
+       ========================================================================== */
+    .app-container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 16px 20px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .top-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      background: linear-gradient(180deg, rgba(22, 32, 51, 0.9), rgba(15, 23, 42, 0.9));
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 14px 18px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-hex {
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(34, 211, 238, 0.12);
+      border: 1px solid rgba(34, 211, 238, 0.35);
+      border-radius: 10px;
+    }
+
+    .title-group h1 {
+      font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .title-group p {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+    }
+
+    .controls-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface-elevated);
+      color: var(--text-primary);
+      transition: all 0.18s ease;
+      user-select: none;
+    }
+
+    .btn:hover {
+      border-color: var(--accent-sky);
+      background: #1e293b;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0891b2);
+      border-color: rgba(56, 189, 248, 0.5);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0369a1, #0e7490);
+    }
+
+    /* Auto-play toggle switch */
+    .toggle-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 13px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .toggle-pill.active {
+      border-color: rgba(34, 211, 238, 0.45);
+      color: var(--text-primary);
+    }
+
+    .switch-track {
+      width: 34px;
+      height: 18px;
+      border-radius: 999px;
+      background: #334155;
+      position: relative;
+      transition: background 0.2s ease;
+    }
+
+    .toggle-pill.active .switch-track {
+      background: #0891b2;
+    }
+
+    .switch-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #f8fafc;
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .toggle-pill.active .switch-thumb {
+      transform: translateX(16px);
+    }
+
+    /* ==========================================================================
+       3. STAGE TABS BAR
+       ========================================================================== */
+    .stage-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    @media (max-width: 900px) {
+      .stage-tabs {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 520px) {
+      .stage-tabs {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .stage-tab {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 12px 14px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-align: left;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .stage-tab:hover {
+      background: var(--bg-surface-elevated);
+      border-color: rgba(148, 163, 184, 0.32);
+    }
+
+    .stage-tab.active {
+      background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+      border-color: var(--tab-accent, var(--accent-cyan));
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.15), 0 10px 25px -10px rgba(0, 0, 0, 0.7);
+    }
+
+    .stage-tab-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 6px;
+    }
+
+    .stage-num {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--tab-accent, var(--accent-cyan));
+    }
+
+    .stage-fn-pill {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+
+    .stage-tab.active .stage-fn-pill {
+      color: var(--text-primary);
+      border-color: var(--tab-accent, var(--accent-cyan));
+    }
+
+    .stage-tab-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .stage-progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      width: 0%;
+      background: var(--tab-accent, var(--accent-cyan));
+      transition: width 0.08s linear;
+    }
+
+    /* ==========================================================================
+       4. MAIN SPLIT WORKSPACE (SVG GLOBE STAGE + PYSPARK CODE PANEL)
+       ========================================================================== */
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 1080px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* SVG Stage Wrapper */
+    .svg-stage-wrapper {
+      position: relative;
+      width: 100%;
+      background: radial-gradient(circle at 50% 48%, #0f1c38 0%, #070c18 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      flex: 1;
+    }
+
+    #earthSvg {
+      width: 100%;
+      height: auto;
+      max-height: 640px;
+      display: block;
+      user-select: none;
+    }
+
+    .stage-caption-bar {
+      padding: 13px 18px;
+      background: rgba(9, 14, 26, 0.92);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .caption-text {
+      font-size: 0.87rem;
+      color: var(--text-secondary);
+      flex: 1;
+      min-width: 240px;
+    }
+
+    .caption-text strong {
+      color: var(--text-primary);
+    }
+
+    .caption-text code {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      background: rgba(30, 41, 59, 0.85);
+      padding: 1px 6px;
+      border-radius: 5px;
+      color: var(--accent-cyan);
+    }
+
+    .zoom-toggle-btn {
+      font-size: 0.78rem;
+      padding: 6px 11px;
+      white-space: nowrap;
+    }
+
+    /* ==========================================================================
+       5. SYNCHRONIZED PYSPARK CODE PANEL
+       ========================================================================== */
+    .code-panel-header {
+      padding: 13px 16px;
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .code-panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .window-dots {
+      display: inline-flex;
+      gap: 5px;
+    }
+
+    .window-dots span {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #334155;
+    }
+
+    .window-dots span:nth-child(1) { background: #ef4444; }
+    .window-dots span:nth-child(2) { background: #f59e0b; }
+    .window-dots span:nth-child(3) { background: #10b981; }
+
+    /* Telemetry / Complexity Metrics Strip */
+    .metrics-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(11, 17, 32, 0.75);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .metric-box {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 7px 10px;
+    }
+
+    .metric-label {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-top: 2px;
+    }
+
+    /* Code Block Lines */
+    .code-scroll {
+      background: var(--bg-code);
+      padding: 12px 0;
+      overflow-x: auto;
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      line-height: 1.62;
+    }
+
+    .code-line {
+      display: flex;
+      padding: 1px 14px 1px 0;
+      border-left: 3px solid transparent;
+      transition: background 0.25s ease, border-color 0.25s ease, opacity 0.25s ease;
+      cursor: pointer;
+    }
+
+    .code-line:hover {
+      background: rgba(56, 189, 248, 0.07);
+    }
+
+    .code-line.dimmed {
+      opacity: 0.44;
+    }
+
+    .code-line.highlighted {
+      opacity: 1;
+      background: var(--hl-bg, rgba(34, 211, 238, 0.14));
+      border-left-color: var(--hl-border, var(--accent-cyan));
+    }
+
+    .line-num {
+      width: 36px;
+      flex-shrink: 0;
+      text-align: right;
+      padding-right: 12px;
+      color: var(--text-muted);
+      user-select: none;
+    }
+
+    .code-line.highlighted .line-num {
+      color: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .line-code {
+      white-space: pre;
+      color: #e2e8f0;
+    }
+
+    /* Syntax Token Colors */
+    .tok-kw { color: #c084fc; font-weight: 600; }
+    .tok-fn { color: #38bdf8; }
+    .tok-sql { color: #22d3ee; font-weight: 600; }
+    .tok-str { color: #86efac; }
+    .tok-num { color: #fbbf24; }
+    .tok-cmt { color: #64748b; font-style: italic; }
+    .tok-cmt-warn { color: #fb7185; font-style: italic; }
+
+    /* Stage Code Explanation Footer */
+    .code-stage-note {
+      padding: 12px 16px;
+      background: rgba(22, 32, 51, 0.9);
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+    }
+
+    .code-stage-note strong {
+      color: var(--text-primary);
+    }
+
+    /* ==========================================================================
+       6. SVG KEYFRAME ANIMATIONS
+       ========================================================================== */
+    @keyframes dashMarch {
+      to {
+        stroke-dashoffset: -28;
+      }
+    }
+
+    @keyframes pulseRing {
+      0% {
+        transform: scale(0.85);
+        opacity: 0.85;
+      }
+      100% {
+        transform: scale(2.15);
+        opacity: 0;
+      }
+    }
+
+    @keyframes floatPin {
+      0%, 100% {
+        transform: translateY(0px);
+      }
+      50% {
+        transform: translateY(-3px);
+      }
+    }
+
+    @keyframes glowPulse {
+      0%, 100% {
+        opacity: 0.72;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
+
+    @keyframes arcFlow {
+      to {
+        stroke-dashoffset: -24;
+      }
+    }
+
+    .beam-march {
+      animation: dashMarch 0.85s linear infinite;
+    }
+
+    .paused .beam-march,
+    .paused .pulse-ring,
+    .paused .pin-float,
+    .paused .hex-glow-pulse,
+    .paused .arc-flow {
+      animation-play-state: paused !important;
+    }
+
+    .pulse-ring {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: pulseRing 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    }
+
+    .pin-float {
+      animation: floatPin 2.2s ease-in-out infinite;
+    }
+
+    .hex-glow-pulse {
+      animation: glowPulse 1.5s ease-in-out infinite;
+    }
+
+    .arc-flow {
+      animation: arcFlow 0.9s linear infinite;
+    }
+
+    /* Toast Message */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid rgba(34, 211, 238, 0.5);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none;
+      transition: all 0.22s ease;
+      z-index: 100;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container" id="appRoot">
+    <!-- ======================================================================
+         TOP HEADER & PLAYBACK CONTROLS
+         ====================================================================== -->
+    <header class="top-bar">
+      <div class="title-group">
+        <div class="brand-hex" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <polygon points="12,2 21,7 21,17 12,22 3,17 3,7" stroke="#22d3ee" stroke-width="2" fill="rgba(34,211,238,0.18)"/>
+            <circle cx="12" cy="12" r="3" fill="#fbbf24"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Databricks H3 Spatial Join on Earth</h1>
+          <p>How hexagonal indexing &amp; K-ring explosion replace O(N &times; M) cross-joins in PySpark</p>
+        </div>
+      </div>
+
+      <div class="controls-group">
+        <div class="toggle-pill active" id="autoPlayToggle" role="switch" aria-checked="true" tabindex="0">
+          <span>Auto-Play Loop</span>
+          <div class="switch-track"><div class="switch-thumb"></div></div>
+        </div>
+
+        <button type="button" class="btn btn-primary" id="playPauseBtn">
+          <svg id="playPauseIcon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <rect x="3" y="2" width="3.5" height="12" rx="1"/>
+            <rect x="9.5" y="2" width="3.5" height="12" rx="1"/>
+          </svg>
+          <span id="playPauseText">Pause</span>
+        </button>
+
+        <button type="button" class="btn" id="nextStageBtn" title="Advance to next stage">
+          <span>Next Stage</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 3l6 5-6 5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ======================================================================
+         4 CLICKABLE STAGE TABS
+         ====================================================================== -->
+    <nav class="stage-tabs" aria-label="Animation Stages">
+      <button type="button" class="stage-tab active" data-stage="1" style="--tab-accent: #f43f5e;">
+        <div class="stage-tab-header">
+          <span class="stage-num">Stage 1 &bull; The Problem</span>
+          <span class="stage-fn-pill">crossJoin</span>
+        </div>
+        <div class="stage-tab-title">Brute-Force Global Pairs</div>
+        <div class="stage-progress-bar" id="prog-1"></div>
+      </button>
+
+      <button type="button" class="stage-tab" data-stage="2" style="--tab-accent: #22d3ee;">
+        <div class="stage-tab-header">
+          <span class="stage-num">Stage 2 &bull; Home Cells</span>
+          <span class="stage-fn-pill">h3_longlatash3</span>
+        </div>
+        <div class="stage-tab-title">Hex Indexing &amp; Border Edge</div>
+        <div class="stage-progress-bar" id="prog-2"></div>
+      </button>
+
+      <button type="button" class="stage-tab" data-stage="3" style="--tab-accent: #f59e0b;">
+        <div class="stage-tab-header">
+          <span class="stage-num">Stage 3 &bull; Neighbor Net</span>
+          <span class="stage-fn-pill">explode(h3_kring)</span>
+        </div>
+        <div class="stage-tab-title">7-Hex K=1 Ring Expansion</div>
+        <div class="stage-progress-bar" id="prog-3"></div>
+      </button>
+
+      <button type="button" class="stage-tab" data-stage="4" style="--tab-accent: #10b981;">
+        <div class="stage-tab-header">
+          <span class="stage-num">Stage 4 &bull; Match &amp; 1-NN</span>
+          <span class="stage-fn-pill">join + min_by</span>
+        </div>
+        <div class="stage-tab-title">Hash Join &amp; Exact Distance</div>
+        <div class="stage-progress-bar" id="prog-4"></div>
+      </button>
+    </nav>
+
+    <!-- ======================================================================
+         MAIN SPLIT WORKSPACE: INTERACTIVE 3D EARTH SVG + PYSPARK CODE PANEL
+         ====================================================================== -->
+    <main class="workspace-grid">
+      <!-- LEFT: 3D-SHADED EARTH & H3 HEXAGONAL SVG VISUALIZATION -->
+      <section class="panel-card" aria-label="Interactive Earth Visualization">
+        <div class="svg-stage-wrapper">
+          <svg id="earthSvg" viewBox="0 0 900 660" role="img" aria-label="3D shaded Earth showing H3 hexagonal spatial join around Kolkata">
+            <defs>
+              <!-- Deep Space Background Gradient -->
+              <radialGradient id="spaceBg" cx="50%" cy="50%" r="70%">
+                <stop offset="0%" stop-color="#111d38"/>
+                <stop offset="60%" stop-color="#0b1120"/>
+                <stop offset="100%" stop-color="#050811"/>
+              </radialGradient>
+
+              <!-- Outer Atmospheric Halo -->
+              <radialGradient id="atmoHalo" cx="50%" cy="50%" r="50%">
+                <stop offset="82%" stop-color="#38bdf8" stop-opacity="0"/>
+                <stop offset="93%" stop-color="#38bdf8" stop-opacity="0.22"/>
+                <stop offset="98%" stop-color="#22d3ee" stop-opacity="0.38"/>
+                <stop offset="100%" stop-color="#0284c7" stop-opacity="0"/>
+              </radialGradient>
+
+              <!-- 3D Spherical Ocean Shading (Sunlit Upper-Left, Terminator Lower-Right) -->
+              <radialGradient id="oceanSphere" cx="38%" cy="32%" r="68%">
+                <stop offset="0%" stop-color="#1d4ed8"/>
+                <stop offset="38%" stop-color="#13346b"/>
+                <stop offset="76%" stop-color="#0b1f42"/>
+                <stop offset="100%" stop-color="#050d1f"/>
+              </radialGradient>
+
+              <!-- Inner Atmospheric Rim & Day/Night Vignette -->
+              <radialGradient id="sphereLimbShade" cx="42%" cy="36%" r="62%">
+                <stop offset="65%" stop-color="#000000" stop-opacity="0"/>
+                <stop offset="89%" stop-color="#020617" stop-opacity="0.32"/>
+                <stop offset="97%" stop-color="#38bdf8" stop-opacity="0.28"/>
+                <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0.55"/>
+              </radialGradient>
+
+              <!-- Landmass Gradient -->
+              <linearGradient id="landGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#1b3b4b"/>
+                <stop offset="55%" stop-color="#132b38"/>
+                <stop offset="100%" stop-color="#0c1d28"/>
+              </linearGradient>
+
+              <!-- Emerald-Gold Match Hex Gradient -->
+              <linearGradient id="matchHexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#10b981" stop-opacity="0.52"/>
+                <stop offset="50%" stop-color="#22d3ee" stop-opacity="0.42"/>
+                <stop offset="100%" stop-color="#fbbf24" stop-opacity="0.52"/>
+              </linearGradient>
+
+              <!-- Soft Glow Filter -->
+              <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3.5" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+
+              <filter id="strongGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="6" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+
+              <!-- Clip Path to Exact Earth Circle -->
+              <clipPath id="earthClip">
+                <circle cx="450" cy="335" r="272"/>
+              </clipPath>
+            </defs>
+
+            <!-- Background Space & Stars -->
+            <rect width="900" height="660" fill="url(#spaceBg)"/>
+            <g id="starfieldLayer"></g>
+
+            <!-- ================================================================
+                 CAMERA-TRANSFORMED 3D GLOBE GROUP (Smooth Zoom Global <-> Kolkata)
+                 ================================================================ -->
+            <g id="globeCamera">
+              <!-- Outer Atmospheric Glow -->
+              <circle cx="450" cy="335" r="306" fill="url(#atmoHalo)"/>
+
+              <!-- Earth Base Ocean Sphere -->
+              <circle cx="450" cy="335" r="272" fill="url(#oceanSphere)"/>
+
+              <!-- Clipped Earth Surface Layers -->
+              <g clip-path="url(#earthClip)">
+                <!-- Latitude / Longitude Graticule Lines -->
+                <g id="graticuleLayer" stroke="rgba(125, 211, 252, 0.13)" stroke-width="0.8" fill="none"></g>
+
+                <!-- Stylized Continents (India/South Asia Focus + Surrounding Continents) -->
+                <g id="continentsLayer"></g>
+
+                <!-- Curved Spherical H3 Hexagonal Mesh -->
+                <g id="h3MeshLayer"></g>
+
+                <!-- Stage 3: Radial Expanding Wave from Forecast Hex B -->
+                <g id="kRingWaveLayer" opacity="0">
+                  <circle id="kRingWaveCircle" cx="495" cy="306" r="10" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="3 2"/>
+                </g>
+
+                <!-- Stage 1: Global Cross-Join Beams & Distant Grid Dots -->
+                <g id="crossJoinLayer"></g>
+
+                <!-- Stage 2: Shared Border Conflict Highlight -->
+                <g id="borderConflictLayer" opacity="0">
+                  <line id="sharedEdgeLine" x1="0" y1="0" x2="0" y2="0" stroke="#fb7185" stroke-width="1.8" stroke-linecap="round" filter="url(#softGlow)"/>
+                </g>
+
+                <!-- Stage 4: Geodesic Arc Between Kolkata & Nearest Forecast Point -->
+                <g id="geodesicArcLayer" opacity="0">
+                  <path id="geodesicArcGlow" d="" fill="none" stroke="#fbbf24" stroke-width="2.4" stroke-opacity="0.45" filter="url(#softGlow)"/>
+                  <path id="geodesicArcPath" d="" fill="none" stroke="#fbbf24" stroke-width="1.15" stroke-dasharray="3 2.5" class="arc-flow"/>
+                </g>
+
+                <!-- City Pin (Kolkata) & Nearest Open-Meteo Forecast Point -->
+                <g id="localPinsLayer"></g>
+
+                <!-- 3D Spherical Limb Shading & Specular Rim -->
+                <circle cx="450" cy="335" r="272" fill="url(#sphereLimbShade)" pointer-events="none"/>
+              </g>
+
+              <!-- Crisp Earth Outer Rim Stroke -->
+              <circle cx="450" cy="335" r="272" fill="none" stroke="rgba(125, 211, 252, 0.35)" stroke-width="1.1"/>
+            </g>
+
+            <!-- ================================================================
+                 SCREEN-SPACE HUD OVERLAYS (Always Crisp & Readable at Any Zoom)
+                 ================================================================ -->
+
+            <!-- Top-Left Compass / Scale Context Pill -->
+            <g transform="translate(20, 18)">
+              <rect width="236" height="44" rx="10" fill="rgba(9, 14, 26, 0.84)" stroke="rgba(148, 163, 184, 0.24)"/>
+              <circle cx="20" cy="22" r="5" fill="#22d3ee"/>
+              <text x="34" y="19" fill="#f1f5f9" font-size="11.5" font-weight="700">Focus: Kolkata (22.57°N, 88.36°E)</text>
+              <text id="hudViewScale" x="34" y="34" fill="#94a3b8" font-size="10.2" font-family="monospace">View: Global Earth (1.0x)</text>
+            </g>
+
+            <!-- Top-Right Legend Card -->
+            <g transform="translate(658, 18)">
+              <rect width="222" height="68" rx="10" fill="rgba(9, 14, 26, 0.84)" stroke="rgba(148, 163, 184, 0.24)"/>
+              <circle cx="18" cy="18" r="5" fill="#22d3ee"/>
+              <text x="30" y="21.5" fill="#e2e8f0" font-size="11">City Pin (dim_city &rarr; city.cell)</text>
+              <polygon points="18,32 23,35 23,41 18,44 13,41 13,35" fill="#f59e0b"/>
+              <text x="30" y="41.5" fill="#e2e8f0" font-size="11">Open-Meteo Grid (fc_lat, fc_lon)</text>
+              <rect x="13" y="51" width="10" height="10" rx="2" fill="rgba(16, 185, 129, 0.45)" stroke="#10b981"/>
+              <text x="30" y="59.5" fill="#e2e8f0" font-size="11">H3 RES=5 (~8.5 km hex edge)</text>
+            </g>
+
+            <!-- STAGE 1 HUD: Brute-Force Cross-Join Counter Badge -->
+            <g id="hudStage1" transform="translate(20, 560)">
+              <rect width="348" height="80" rx="12" fill="rgba(24, 10, 18, 0.9)" stroke="rgba(244, 63, 94, 0.65)" stroke-width="1.3"/>
+              <circle cx="24" cy="26" r="6" fill="#f43f5e" class="hex-glow-pulse"/>
+              <text x="38" y="29" fill="#fda4af" font-size="11.5" font-weight="700" letter-spacing="0.04em">BRUTE-FORCE CROSS JOIN</text>
+              <text id="crossJoinCounterText" x="20" y="53" fill="#ffffff" font-size="18" font-weight="800" font-family="monospace">2.5B pairs — slow</text>
+              <text x="20" y="70" fill="#cbd5e1" font-size="11">Every city runs 6 trig ops against every global grid point</text>
+            </g>
+
+            <!-- STAGE 2 HUD: Border Problem Callout (Hex A != Hex B) -->
+            <g id="hudStage2" transform="translate(20, 548)" opacity="0" pointer-events="none">
+              <rect width="386" height="92" rx="12" fill="rgba(9, 14, 26, 0.92)" stroke="rgba(34, 211, 238, 0.55)" stroke-width="1.3"/>
+              <text x="16" y="23" fill="#22d3ee" font-size="11.5" font-weight="700" letter-spacing="0.04em">THE HEXAGON BORDER PROBLEM</text>
+              <text x="16" y="45" fill="#f8fafc" font-size="14.5" font-weight="700" font-family="monospace">Hex A (853cc2...) &ne; Hex B (853cc6...)</text>
+              <text x="16" y="65" fill="#cbd5e1" font-size="11.5">Kolkata &amp; its snapped forecast point sit just <tspan fill="#fbbf24" font-weight="700">4.52 km</tspan> apart,</text>
+              <text x="16" y="81" fill="#94a3b8" font-size="11">but on opposite sides of a hex edge—so exact cell == cell misses!</text>
+            </g>
+
+            <!-- STAGE 3 HUD: Animated Array-to-7-Rows Explode Mini-Diagram -->
+            <g id="hudStage3" transform="translate(515, 424)" opacity="0" pointer-events="none">
+              <rect width="365" height="216" rx="12" fill="rgba(9, 14, 26, 0.93)" stroke="rgba(245, 158, 11, 0.6)" stroke-width="1.3"/>
+              <text x="14" y="22" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="0.04em">explode(h3_kring(fc_cell, 1)) &rarr; 1 TO 7 ROWS</text>
+
+              <!-- Left Box: Single Array of 7 IDs -->
+              <rect x="14" y="34" width="128" height="114" rx="8" fill="#131c31" stroke="rgba(245, 158, 11, 0.45)"/>
+              <text x="22" y="51" fill="#94a3b8" font-size="9.5" font-family="monospace">1 Forecast Row</text>
+              <text x="22" y="66" fill="#fcd34d" font-size="9.5" font-weight="700" font-family="monospace">ARRAY&lt;BIGINT&gt;[7]</text>
+              <text x="22" y="84" fill="#e2e8f0" font-size="9" font-family="monospace">[0] 853cc6... (B)</text>
+              <text x="22" y="98" fill="#22d3ee" font-size="9" font-weight="700" font-family="monospace">[1] 853cc2... (A)</text>
+              <text x="22" y="112" fill="#94a3b8" font-size="9" font-family="monospace">[2] 853cc4...</text>
+              <text x="22" y="126" fill="#94a3b8" font-size="9" font-family="monospace">[3..6] +4 rings</text>
+
+              <!-- Explode Fan-out Arrows -->
+              <g stroke="#f59e0b" stroke-width="1.3" fill="none" opacity="0.85">
+                <path d="M144 65 C 165 65, 165 44, 186 44"/>
+                <path d="M144 82 C 165 82, 165 67, 186 67"/>
+                <path d="M144 95 L 186 90"/>
+                <path d="M144 105 L 186 113"/>
+                <path d="M144 115 C 165 115, 165 136, 186 136"/>
+                <path d="M144 125 C 165 125, 165 159, 186 159"/>
+                <path d="M144 135 C 165 135, 165 182, 186 182"/>
+              </g>
+
+              <!-- Right Stack: 7 Individual Rows (locs.nbr) -->
+              <g font-family="monospace" font-size="9.2">
+                <rect x="188" y="34" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.25)"/>
+                <text x="195" y="46.5" fill="#cbd5e1">nbr: 853cc6... (center)</text>
+
+                <!-- Highlighted Row Overlapping City's Cyan Hex A -->
+                <rect x="188" y="57" width="163" height="20" rx="4" fill="rgba(34, 211, 238, 0.2)" stroke="#22d3ee" stroke-width="1.2"/>
+                <text x="195" y="70" fill="#22d3ee" font-weight="700">nbr: 853cc2... &larr; Hex A!</text>
+
+                <rect x="188" y="81" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.2)"/>
+                <text x="195" y="93.5" fill="#94a3b8">nbr: 853cc4... (ring 1)</text>
+
+                <rect x="188" y="104" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.2)"/>
+                <text x="195" y="116.5" fill="#94a3b8">nbr: 853cc0... (ring 1)</text>
+
+                <rect x="188" y="127" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.2)"/>
+                <text x="195" y="139.5" fill="#94a3b8">nbr: 853cc7... (ring 1)</text>
+
+                <rect x="188" y="150" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.2)"/>
+                <text x="195" y="162.5" fill="#94a3b8">nbr: 853cc1... (ring 1)</text>
+
+                <rect x="188" y="173" width="163" height="19" rx="4" fill="#182238" stroke="rgba(148,163,184,0.2)"/>
+                <text x="195" y="185.5" fill="#94a3b8">nbr: 853cc3... (ring 1)</text>
+              </g>
+
+              <text x="14" y="206" fill="#cbd5e1" font-size="10.5">K=1 ring covers Kolkata's cyan Hex A without touching distant cells.</text>
+            </g>
+
+            <!-- STAGE 4 HUD: Hash Join Match + st_distancesphere + min_by Winner -->
+            <g id="hudStage4" transform="translate(20, 536)" opacity="0" pointer-events="none">
+              <rect width="435" height="104" rx="12" fill="rgba(7, 24, 21, 0.93)" stroke="rgba(16, 185, 129, 0.75)" stroke-width="1.4"/>
+              <rect x="14" y="12" width="146" height="21" rx="5" fill="rgba(16, 185, 129, 0.22)" stroke="#10b981"/>
+              <text x="23" y="26" fill="#6ee7b7" font-size="10.5" font-weight="800" letter-spacing="0.04em">HASH JOIN MATCH!</text>
+
+              <rect x="170" y="12" width="166" height="21" rx="5" fill="rgba(251, 191, 36, 0.2)" stroke="#fbbf24"/>
+              <text x="179" y="26" fill="#fde68a" font-size="10.5" font-weight="800">min_by &rarr; 1-NN WINNER</text>
+
+              <text x="16" y="57" fill="#ffffff" font-size="17" font-weight="800" font-family="monospace">4.52 km via st_distancesphere</text>
+              <text x="16" y="77" fill="#a7f3d0" font-size="11.5">Equi-join on <tspan font-family="monospace" font-weight="700">city.cell == locs.nbr</tspan> prunes 99.99% of global pairs;</text>
+              <text x="16" y="93" fill="#cbd5e1" font-size="11">C++ spherical distance + <tspan font-family="monospace" color="#fde68a">min_by</tspan> picks the exact closest grid point.</text>
+            </g>
+          </svg>
+
+          <!-- Caption & Camera Toggle Bar -->
+          <div class="stage-caption-bar">
+            <div class="caption-text" id="stageCaption">
+              <strong>Stage 1 — Brute-Force Cross Join:</strong> Without spatial indexing, Kolkata is paired against every forecast point across all continents (<code>O(N &times; M)</code>), computing billions of expensive trigonometric distances.
+            </div>
+            <button type="button" class="btn zoom-toggle-btn" id="cameraToggleBtn">
+              Toggle Global / Regional Zoom
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: SYNCHRONIZED PYSPARK CODE PANEL -->
+      <aside class="panel-card" aria-label="Synchronized PySpark Code">
+        <div class="code-panel-header">
+          <div class="code-panel-title">
+            <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span>h3_nearest_neighbor.py</span>
+          </div>
+          <button type="button" class="btn" id="copyCodeBtn" style="padding: 5px 11px; font-size: 0.78rem;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+              <path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/>
+            </svg>
+            <span>Copy PySpark</span>
+          </button>
+        </div>
+
+        <!-- Dynamic Stage Telemetry Metrics -->
+        <div class="metrics-strip">
+          <div class="metric-box">
+            <div class="metric-label">Candidate Pairs</div>
+            <div class="metric-value" id="metricPairs" style="color: #fda4af;">2,500,000,000</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Spark Join Type</div>
+            <div class="metric-value" id="metricJoin" style="color: #fb7185;">BroadcastNestedLoop</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Trig Evaluations</div>
+            <div class="metric-value" id="metricCost" style="color: #fca5a5;">100% (All Pairs)</div>
+          </div>
+        </div>
+
+        <!-- Highlightable PySpark Code Lines -->
+        <div class="code-scroll" id="codeContainer"></div>
+
+        <!-- Synchronized Stage Explanation Footer -->
+        <div class="code-stage-note" id="codeStageNote">
+          <strong>Active Step:</strong> Click any stage tab above or any highlighted code block to inspect how Spark compiles the H3 spatial join.
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Non-blocking Toast Feedback -->
+  <div class="toast" id="toast">Copied PySpark snippet to clipboard!</div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      /* ========================================================================
+         1. STAGE CONFIGURATION & PYSPARK SOURCE DEFINITION
+         ======================================================================== */
+      const STAGE_DURATION_MS = 6500;
+
+      const STAGES = {
+        1: {
+          title: "Stage 1 — Brute-Force Cross Join",
+          zoomMode: "global",
+          caption:
+            "<strong>Stage 1 — The Problem (<code>crossJoin</code>):</strong> Kolkata shoots distance checks to forecast points across every continent (<code>O(N &times; M)</code>), burning CPU on billions of irrelevant pairs.",
+          codeNote:
+            "<strong>Why we avoid Line 6:</strong> <code>crossJoin</code> forces Spark to evaluate 6 trigonometric functions on every <code>(city, location)</code> pair globally before discarding 99.99% of them.",
+          metrics: {
+            pairs: ["2,500,000,000", "#fda4af"],
+            join: ["BroadcastNestedLoop", "#fb7185"],
+            cost: ["100% (O(N × M))", "#fca5a5"]
+          },
+          highlightLines: [6],
+          hlBg: "rgba(244, 63, 94, 0.16)",
+          hlBorder: "#f43f5e"
+        },
+        2: {
+          title: "Stage 2 — Home Hexagons",
+          zoomMode: "regional",
+          caption:
+            "<strong>Stage 2 — Home Hexagons (<code>h3_longlatash3</code>):</strong> Earth is tiled into H3 hexagons (<code>RES=5</code>). Kolkata lands in cyan <strong>Hex A</strong>, while its snapped forecast point (4.52 km away) lands across the border in amber <strong>Hex B</strong>.",
+          codeNote:
+            "<strong>Lines 8–12:</strong> <code>h3_longlatash3(lon, lat, 5)</code> maps each coordinate to a 64-bit integer cell ID. Because points straddle a hex boundary, <code>Hex A &ne; Hex B</code>.",
+          metrics: {
+            pairs: ["0 (Indexing Only)", "#22d3ee"],
+            join: ["Single-Cell Partition", "#38bdf8"],
+            cost: ["O(N + M) Linear", "#7dd3fc"]
+          },
+          highlightLines: [3, 8, 9, 10, 11, 12],
+          hlBg: "rgba(34, 211, 238, 0.15)",
+          hlBorder: "#22d3ee"
+        },
+        3: {
+          title: "Stage 3 — Neighbor Net",
+          zoomMode: "regional",
+          caption:
+            "<strong>Stage 3 — Neighbor Net (<code>explode(h3_kring(..., 1))</code>):</strong> Expanding Hex B by <code>K=1</code> ring explodes 1 forecast row into <strong>7 neighbor cell rows</strong>, visibly covering Kolkata's cyan Hex A.",
+          codeNote:
+            "<strong>Lines 14–20:</strong> <code>h3_kring(..., 1)</code> returns the center hexagon plus all 6 adjacent hexagons (7 IDs). <code>F.explode()</code> turns that array into 7 joinable rows (<code>locs.nbr</code>).",
+          metrics: {
+            pairs: ["7x Forecast Rows", "#fbbf24"],
+            join: ["K=1 Ring Expansion", "#f59e0b"],
+            cost: ["~12.8 km Radius", "#fcd34d"]
+          },
+          highlightLines: [4, 14, 15, 16, 17, 18, 19, 20],
+          hlBg: "rgba(245, 158, 11, 0.16)",
+          hlBorder: "#f59e0b"
+        },
+        4: {
+          title: "Stage 4 — Hash Join & Exact Distance",
+          zoomMode: "regional",
+          caption:
+            "<strong>Stage 4 — Hash Join &amp; 1-NN Winner:</strong> Integer equi-join <code>city.cell == locs.nbr</code> matches Hex A instantly! Native C++ <code>st_distancesphere</code> measures <strong>4.52 km</strong> and <code>min_by</code> picks the winner.",
+          codeNote:
+            "<strong>Lines 22–32:</strong> Spark executes a fast Broadcast Hash Join on 64-bit H3 integers, computes exact spherical meters in C++ via <code>st_distancesphere</code>, and selects the closest point with <code>min_by</code>.",
+          metrics: {
+            pairs: ["~150,000 (0.006%)", "#6ee7b7"],
+            join: ["BroadcastHashJoin", "#10b981"],
+            cost: ["4.52 km Exact 1-NN", "#fde68a"]
+          },
+          highlightLines: [22, 23, 25, 26, 27, 28, 29, 30, 31, 32],
+          hlBg: "rgba(16, 185, 129, 0.16)",
+          hlBorder: "#10b981"
+        }
+      };
+
+      const CODE_LINES = [
+        { num: 1,  stage: 0, html: `<span class="tok-kw">from</span> pyspark.sql <span class="tok-kw">import</span> functions <span class="tok-kw">as</span> F` },
+        { num: 2,  stage: 0, html: `` },
+        { num: 3,  stage: 2, html: `RES = <span class="tok-num">5</span>  <span class="tok-cmt"># ~8.5 km hex edge (~12.8 km guaranteed 1-ring radius)</span>` },
+        { num: 4,  stage: 3, html: `K = <span class="tok-num">1</span>    <span class="tok-cmt"># 1 ring = center cell + 6 surrounding hexagons (7 total)</span>` },
+        { num: 5,  stage: 0, html: `` },
+        { num: 6,  stage: 1, html: `<span class="tok-cmt-warn"># Stage 1 Avoided: city.crossJoin(F.broadcast(locs)) -> O(N x M) slow!</span>` },
+        { num: 7,  stage: 0, html: `` },
+        { num: 8,  stage: 2, html: `<span class="tok-cmt"># 1. Assign each city its home 64-bit H3 cell (city.cell)</span>` },
+        { num: 9,  stage: 2, html: `city_c = (` },
+        { num: 10, stage: 2, html: `    spark.<span class="tok-fn">table</span>(<span class="tok-str">"workspace.open_meteo.dim_city"</span>)` },
+        { num: 11, stage: 2, html: `    .<span class="tok-fn">withColumn</span>(<span class="tok-str">"cell"</span>, F.<span class="tok-fn">expr</span>(<span class="tok-str">f"<span class="tok-sql">h3_longlatash3</span>(longitude, latitude, {RES})"</span>))` },
+        { num: 12, stage: 2, html: `)` },
+        { num: 13, stage: 0, html: `` },
+        { num: 14, stage: 3, html: `<span class="tok-cmt"># 2. Explode each forecast grid point into 7 K=1 neighbor rows</span>` },
+        { num: 15, stage: 3, html: `locs_c = (` },
+        { num: 16, stage: 3, html: `    locs.<span class="tok-fn">withColumn</span>(` },
+        { num: 17, stage: 3, html: `        <span class="tok-str">"nbr"</span>,` },
+        { num: 18, stage: 3, html: `        F.<span class="tok-fn">explode</span>(F.<span class="tok-fn">expr</span>(<span class="tok-str">f"<span class="tok-sql">h3_kring</span>(<span class="tok-sql">h3_longlatash3</span>(fc_lon, fc_lat, {RES}), {K})"</span>)),` },
+        { num: 19, stage: 3, html: `    )` },
+        { num: 20, stage: 3, html: `)` },
+        { num: 21, stage: 0, html: `` },
+        { num: 22, stage: 4, html: `<span class="tok-cmt"># 3. Fast integer Broadcast Hash Join on overlapping H3 IDs</span>` },
+        { num: 23, stage: 4, html: `cand = city_c.<span class="tok-fn">join</span>(F.<span class="tok-fn">broadcast</span>(locs_c), city_c.cell == locs_c.nbr, how=<span class="tok-str">"inner"</span>)` },
+        { num: 24, stage: 0, html: `` },
+        { num: 25, stage: 4, html: `<span class="tok-cmt"># 4. Exact spherical distance (km) & 1-NN winner via min_by</span>` },
+        { num: 26, stage: 4, html: `nearest = (` },
+        { num: 27, stage: 4, html: `    cand.<span class="tok-fn">withColumn</span>(` },
+        { num: 28, stage: 4, html: `        <span class="tok-str">"distance_km"</span>,` },
+        { num: 29, stage: 4, html: `        F.<span class="tok-fn">expr</span>(<span class="tok-str">"<span class="tok-sql">st_distancesphere</span>(<span class="tok-sql">st_point</span>(longitude, latitude), <span class="tok-sql">st_point</span>(fc_lon, fc_lat)) / 1000.0"</span>),` },
+        { num: 30, stage: 4, html: `    )` },
+        { num: 31, stage: 4, html: `    .<span class="tok-fn">groupBy</span>(<span class="tok-str">"city_id"</span>, <span class="tok-str">"name"</span>, <span class="tok-str">"country"</span>)` },
+        { num: 32, stage: 4, html: `    .<span class="tok-fn">agg</span>(F.<span class="tok-fn">min_by</span>(F.<span class="tok-fn">struct</span>(<span class="tok-str">"distance_km"</span>, <span class="tok-str">"fc_lat"</span>, <span class="tok-str">"fc_lon"</span>), <span class="tok-str">"distance_km"</span>).<span class="tok-fn">alias</span>(<span class="tok-str">"best"</span>))` },
+        { num: 33, stage: 0, html: `)` }
+      ];
+
+      const RAW_PYSPARK_TEXT = `from pyspark.sql import functions as F
+
+RES = 5  # ~8.5 km hex edge (~12.8 km guaranteed 1-ring radius)
+K = 1    # 1 ring = center cell + 6 surrounding hexagons (7 total)
+
+# Stage 1 Avoided: city.crossJoin(F.broadcast(locs)) -> O(N x M) slow!
+
+# 1. Assign each city its home 64-bit H3 cell (city.cell)
+city_c = (
+    spark.table("workspace.open_meteo.dim_city")
+    .withColumn("cell", F.expr(f"h3_longlatash3(longitude, latitude, {RES})"))
+)
+
+# 2. Explode each forecast grid point into 7 K=1 neighbor rows
+locs_c = (
+    locs.withColumn(
+        "nbr",
+        F.explode(F.expr(f"h3_kring(h3_longlatash3(fc_lon, fc_lat, {RES}), {K})")),
+    )
+)
+
+# 3. Fast integer Broadcast Hash Join on overlapping H3 IDs
+cand = city_c.join(F.broadcast(locs_c), city_c.cell == locs_c.nbr, how="inner")
+
+# 4. Exact spherical distance (km) & 1-NN winner via min_by
+nearest = (
+    cand.withColumn(
+        "distance_km",
+        F.expr("st_distancesphere(st_point(longitude, latitude), st_point(fc_lon, fc_lat)) / 1000.0"),
+    )
+    .groupBy("city_id", "name", "country")
+    .agg(F.min_by(F.struct("distance_km", "fc_lat", "fc_lon"), "distance_km").alias("best"))
+)`;
+
+      /* ========================================================================
+         2. 3D ORTHOGRAPHIC EARTH PROJECTION & GEOGRAPHIC DATA
+         ======================================================================== */
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const GLOBE_CX = 450;
+      const GLOBE_CY = 335;
+      const GLOBE_R = 272;
+
+      // Center camera hemisphere over South Asia / Indian Ocean so India, Africa, Europe, Asia & Australia appear
+      const CENTER_LAT = 16.0;
+      const CENTER_LON = 77.0;
+      const DEG2RAD = Math.PI / 180;
+
+      // Kolkata exact anchor
+      const KOLKATA_LAT = 22.57;
+      const KOLKATA_LON = 88.36;
+
+      function projectOrtho(latDeg, lonDeg) {
+        const phi = latDeg * DEG2RAD;
+        const lam = lonDeg * DEG2RAD;
+        const phi0 = CENTER_LAT * DEG2RAD;
+        const lam0 = CENTER_LON * DEG2RAD;
+
+        const dLam = lam - lam0;
+        const cosPhi = Math.cos(phi);
+        const sinPhi = Math.sin(phi);
+        const cosPhi0 = Math.cos(phi0);
+        const sinPhi0 = Math.sin(phi0);
+        const cosDLam = Math.cos(dLam);
+
+        const cosC = sinPhi0 * sinPhi + cosPhi0 * cosPhi * cosDLam;
+        const x = GLOBE_CX + GLOBE_R * cosPhi * Math.sin(dLam);
+        const y = GLOBE_CY - GLOBE_R * (cosPhi0 * sinPhi - sinPhi0 * cosPhi * cosDLam);
+
+        return { x, y, visible: cosC >= -0.04, cosC };
+      }
+
+      // Stylized simplified continent polygons [lat, lon] focused around South Asia & neighboring continents
+      const CONTINENTS = [
+        // Indian Subcontinent & South/Central/East Asia
+        [
+          [23.5, 68.5], [20.5, 70.5], [21.5, 72.6], [18.9, 72.8], [15.0, 74.0],
+          [11.5, 75.6], [8.1, 77.5], [10.3, 79.8], [13.1, 80.3], [16.2, 81.8],
+          [19.8, 85.8], [21.6, 87.8], [22.3, 89.2], [21.5, 92.0], [16.5, 94.3],
+          [14.0, 98.0], [8.0, 98.5], [1.4, 103.8], [4.5, 103.4], [12.5, 101.0],
+          [10.5, 105.0], [16.0, 108.2], [21.0, 107.5], [22.5, 114.2], [25.0, 119.0],
+          [30.5, 121.8], [35.0, 120.5], [39.5, 118.0], [40.5, 124.5], [35.5, 129.0],
+          [42.5, 131.0], [50.0, 140.0], [58.0, 142.0], [64.0, 130.0], [68.0, 105.0],
+          [68.0, 75.0], [62.0, 60.0], [55.0, 52.0], [46.0, 49.0], [41.5, 51.5],
+          [37.0, 54.0], [39.5, 48.5], [42.0, 41.5], [41.0, 29.0], [36.5, 28.0],
+          [36.5, 35.8], [32.0, 34.8], [29.5, 34.9], [28.0, 34.5], [21.5, 39.2],
+          [13.0, 43.3], [12.6, 45.0], [16.5, 53.0], [22.5, 59.8], [26.2, 56.2],
+          [24.5, 54.4], [29.5, 48.0], [27.2, 51.5], [25.3, 60.5], [25.0, 66.8]
+        ],
+        // Sri Lanka
+        [
+          [9.8, 80.1], [8.6, 81.2], [6.2, 81.7], [6.0, 80.2], [7.9, 79.8]
+        ],
+        // Africa
+        [
+          [31.5, 32.3], [31.2, 25.0], [33.0, 11.5], [37.0, 10.2], [35.5, 0.0],
+          [31.0, -9.5], [21.0, -17.0], [14.5, -17.5], [5.0, -7.5], [4.5, 7.0],
+          [-5.0, 12.0], [-17.0, 11.8], [-34.0, 18.5], [-34.0, 25.5], [-26.0, 32.8],
+          [-16.0, 40.0], [-5.0, 39.2], [2.0, 45.3], [11.8, 51.2], [11.5, 43.2],
+          [18.0, 38.5], [24.0, 35.5], [29.8, 32.5]
+        ],
+        // Madagascar
+        [
+          [-12.2, 49.3], [-16.0, 50.2], [-25.2, 47.0], [-25.0, 44.0], [-16.5, 44.3]
+        ],
+        // Europe
+        [
+          [36.5, -5.5], [43.3, -8.5], [43.5, -1.5], [48.5, -4.5], [51.0, 2.0],
+          [54.0, 8.5], [58.0, 10.5], [63.5, 11.0], [70.0, 25.0], [66.0, 40.0],
+          [58.0, 50.0], [47.0, 40.0], [45.0, 33.5], [41.5, 28.5], [38.0, 23.5],
+          [40.5, 18.0], [44.5, 12.3], [41.0, 14.0], [38.2, 15.6], [43.5, 7.2],
+          [41.5, 2.2], [36.8, -2.2]
+        ],
+        // Sumatra & Java
+        [
+          [5.5, 95.3], [1.0, 103.5], [-5.8, 105.8], [-6.2, 104.5], [1.5, 98.5]
+        ],
+        [
+          [-6.1, 106.0], [-7.0, 112.5], [-8.5, 114.4], [-8.2, 108.0], [-6.8, 105.4]
+        ],
+        // Borneo & Sulawesi & Philippines
+        [
+          [6.8, 116.8], [1.0, 118.8], [-3.8, 116.0], [-3.2, 110.5], [2.0, 109.5]
+        ],
+        [
+          [14.5, 120.8], [18.2, 121.8], [13.0, 124.0], [7.0, 126.2], [6.5, 122.0], [10.5, 122.5]
+        ],
+        // Australia
+        [
+          [-12.0, 131.0], [-11.5, 142.5], [-20.0, 148.5], [-28.0, 153.5], [-37.5, 150.0],
+          [-38.0, 141.0], [-34.5, 135.5], [-32.0, 126.0], [-34.5, 115.5], [-22.0, 114.0],
+          [-15.0, 124.5]
+        ]
+      ];
+
+      // Distant global forecast grid targets for Stage 1 Cross-Join beams
+      const GLOBAL_TARGETS = [
+        { name: "London", lat: 51.5, lon: -0.1 },
+        { name: "Paris", lat: 48.8, lon: 2.3 },
+        { name: "Madrid", lat: 40.4, lon: -3.7 },
+        { name: "Rome", lat: 41.9, lon: 12.5 },
+        { name: "Berlin", lat: 52.5, lon: 13.4 },
+        { name: "Moscow", lat: 55.7, lon: 37.6 },
+        { name: "Istanbul", lat: 41.0, lon: 28.9 },
+        { name: "Cairo", lat: 30.0, lon: 31.2 },
+        { name: "Lagos", lat: 6.5, lon: 3.4 },
+        { name: "Nairobi", lat: -1.3, lon: 36.8 },
+        { name: "Johannesburg", lat: -26.2, lon: 28.0 },
+        { name: "Riyadh", lat: 24.7, lon: 46.7 },
+        { name: "Dubai", lat: 25.2, lon: 55.3 },
+        { name: "Tehran", lat: 35.7, lon: 51.4 },
+        { name: "Tashkent", lat: 41.3, lon: 69.2 },
+        { name: "Mumbai", lat: 19.1, lon: 72.9 },
+        { name: "Delhi", lat: 28.6, lon: 77.2 },
+        { name: "Bengaluru", lat: 12.9, lon: 77.6 },
+        { name: "Bangkok", lat: 13.7, lon: 100.5 },
+        { name: "Singapore", lat: 1.3, lon: 103.8 },
+        { name: "Jakarta", lat: -6.2, lon: 106.8 },
+        { name: "Manila", lat: 14.6, lon: 121.0 },
+        { name: "Beijing", lat: 39.9, lon: 116.4 },
+        { name: "Shanghai", lat: 31.2, lon: 121.5 },
+        { name: "Tokyo", lat: 35.7, lon: 139.7 },
+        { name: "Perth", lat: -31.9, lon: 115.8 },
+        { name: "Sydney", lat: -33.8, lon: 151.2 }
+      ];
+
+      /* ========================================================================
+         3. SVG SCENE BUILDERS (Stars, Graticules, Continents, Curved H3 Hexes)
+         ======================================================================== */
+      function createSvgEl(tag, attrs = {}) {
+        const el = document.createElementNS(SVG_NS, tag);
+        for (const [k, v] of Object.entries(attrs)) {
+          el.setAttribute(k, v);
+        }
+        return el;
+      }
+
+      // Deterministic pseudo-random helper for clean star placement
+      function seededRand(seed) {
+        const x = Math.sin(seed * 91.3458) * 47453.5453;
+        return x - Math.floor(x);
+      }
+
+      function buildStarfield() {
+        const layer = document.getElementById("starfieldLayer");
+        for (let i = 0; i < 110; i++) {
+          const sx = seededRand(i + 1) * 900;
+          const sy = seededRand(i + 201) * 660;
+          const distFromCenter = Math.hypot(sx - GLOBE_CX, sy - GLOBE_CY);
+          if (distFromCenter < GLOBE_R + 18) continue;
+
+          const r = 0.55 + seededRand(i + 401) * 1.15;
+          const op = 0.22 + seededRand(i + 601) * 0.65;
+          layer.appendChild(
+            createSvgEl("circle", {
+              cx: sx.toFixed(1),
+              cy: sy.toFixed(1),
+              r: r.toFixed(2),
+              fill: i % 5 === 0 ? "#bae6fd" : "#f8fafc",
+              opacity: op.toFixed(2)
+            })
+          );
+        }
+      }
+
+      function buildGraticules() {
+        const layer = document.getElementById("graticuleLayer");
+        // Parallels (Latitude lines)
+        for (let lat = -60; lat <= 75; lat += 15) {
+          let d = "";
+          let penDown = false;
+          for (let lon = -180; lon <= 180; lon += 3) {
+            const p = projectOrtho(lat, lon);
+            if (p.visible) {
+              d += `${penDown ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)} `;
+              penDown = true;
+            } else {
+              penDown = false;
+            }
+          }
+          if (d) {
+            layer.appendChild(
+              createSvgEl("path", {
+                d,
+                stroke: lat === 0 ? "rgba(56, 189, 248, 0.25)" : "rgba(125, 211, 252, 0.12)"
+              })
+            );
+          }
+        }
+
+        // Meridians (Longitude lines)
+        for (let lon = -180; lon < 180; lon += 15) {
+          let d = "";
+          let penDown = false;
+          for (let lat = -85; lat <= 85; lat += 3) {
+            const p = projectOrtho(lat, lon);
+            if (p.visible) {
+              d += `${penDown ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)} `;
+              penDown = true;
+            } else {
+              penDown = false;
+            }
+          }
+          if (d) {
+            layer.appendChild(createSvgEl("path", { d }));
+          }
+        }
+      }
+
+      function buildContinents() {
+        const layer = document.getElementById("continentsLayer");
+        CONTINENTS.forEach((poly) => {
+          let d = "";
+          poly.forEach(([lat, lon], idx) => {
+            // Clamp points slightly behind horizon onto the rim so polygons close cleanly
+            const phi = lat * DEG2RAD;
+            const lam = lon * DEG2RAD;
+            const phi0 = CENTER_LAT * DEG2RAD;
+            const lam0 = CENTER_LON * DEG2RAD;
+            const dLam = lam - lam0;
+            const cosC =
+              Math.sin(phi0) * Math.sin(phi) +
+              Math.cos(phi0) * Math.cos(phi) * Math.cos(dLam);
+
+            let x = GLOBE_CX + GLOBE_R * Math.cos(phi) * Math.sin(dLam);
+            let y =
+              GLOBE_CY -
+              GLOBE_R *
+                (Math.cos(phi0) * Math.sin(phi) -
+                  Math.sin(phi0) * Math.cos(phi) * Math.cos(dLam));
+
+            if (cosC < 0) {
+              const angle = Math.atan2(y - GLOBE_CY, x - GLOBE_CX);
+              x = GLOBE_CX + GLOBE_R * Math.cos(angle);
+              y = GLOBE_CY + GLOBE_R * Math.sin(angle);
+            }
+            d += `${idx === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)} `;
+          });
+          d += "Z";
+
+          layer.appendChild(
+            createSvgEl("path", {
+              d,
+              fill: "url(#landGrad)",
+              stroke: "rgba(45, 212, 191, 0.34)",
+              "stroke-width": "0.85",
+              "stroke-linejoin": "round"
+            })
+          );
+        });
+      }
+
+      // Store hex references & key anchors for stage updates
+      const hexRegistry = new Map();
+      let kolkataScreen = { x: 0, y: 0 };
+      let forecastScreen = { x: 0, y: 0 };
+      let hexACenter = { x: 0, y: 0 };
+      let hexBCenter = { x: 0, y: 0 };
+      let sharedEdgeCoords = { x1: 0, y1: 0, x2: 0, y2: 0 };
+
+      // Axial coordinates for Hex A (Kolkata), Hex B (Forecast), and K=1 Ring around Hex B
+      const HEX_A_KEY = "0,0";
+      const HEX_B_KEY = "1,0";
+      const K1_RING_KEYS = new Set(["1,0", "0,0", "2,0", "1,-1", "2,-1", "0,1", "1,1"]);
+
+      function buildSphericalH3Mesh() {
+        const layer = document.getElementById("h3MeshLayer");
+        // Pointy-top hex radius in local degrees (renders curved H3 honeycomb across Earth)
+        const hexSizeDeg = 1.48;
+        const cosLatK = Math.cos(KOLKATA_LAT * DEG2RAD);
+
+        function axialToLatLon(q, r) {
+          const dx = hexSizeDeg * Math.sqrt(3) * (q + r / 2);
+          const dy = hexSizeDeg * 1.5 * r;
+          return {
+            lat: KOLKATA_LAT + dy,
+            lon: KOLKATA_LON + dx / cosLatK
+          };
+        }
+
+        function hexCornerLatLon(q, r, cornerIdx) {
+          const centerDx = hexSizeDeg * Math.sqrt(3) * (q + r / 2);
+          const centerDy = hexSizeDeg * 1.5 * r;
+          const angleRad = ((60 * cornerIdx - 30) * Math.PI) / 180;
+          const vx = centerDx + hexSizeDeg * Math.cos(angleRad);
+          const vy = centerDy + hexSizeDeg * Math.sin(angleRad);
+          return {
+            lat: KOLKATA_LAT + vy,
+            lon: KOLKATA_LON + vx / cosLatK
+          };
+        }
+
+        // Generate spherical-projected H3 cells across visible region
+        for (let r = -15; r <= 15; r++) {
+          for (let q = -18; q <= 18; q++) {
+            const cGeo = axialToLatLon(q, r);
+            const cProj = projectOrtho(cGeo.lat, cGeo.lon);
+            if (!cProj.visible || cProj.cosC < 0.12) continue;
+
+            const pts = [];
+            const screenPts = [];
+            for (let i = 0; i < 6; i++) {
+              const vGeo = hexCornerLatLon(q, r, i);
+              const vProj = projectOrtho(vGeo.lat, vGeo.lon);
+              pts.push(`${vProj.x.toFixed(2)},${vProj.y.toFixed(2)}`);
+              screenPts.push(vProj);
+            }
+
+            const key = `${q},${r}`;
+            const poly = createSvgEl("polygon", {
+              points: pts.join(" "),
+              fill: "rgba(56, 189, 248, 0.02)",
+              stroke: "rgba(56, 189, 248, 0.22)",
+              "stroke-width": "0.45",
+              "stroke-linejoin": "round"
+            });
+
+            layer.appendChild(poly);
+            hexRegistry.set(key, {
+              q,
+              r,
+              el: poly,
+              center: cProj,
+              corners: screenPts
+            });
+          }
+        }
+
+        // Extract exact screen coordinates for Hex A (0,0), Hex B (1,0), shared edge, and pins
+        const hexA = hexRegistry.get(HEX_A_KEY);
+        const hexB = hexRegistry.get(HEX_B_KEY);
+
+        hexACenter = hexA.center;
+        hexBCenter = hexB.center;
+
+        // Shared vertical edge between pointy-top (0,0) and (1,0) connects corner 0 (top-right) and corner 1 (bottom-right) of (0,0)
+        sharedEdgeCoords = {
+          x1: hexA.corners[0].x,
+          y1: hexA.corners[0].y,
+          x2: hexA.corners[1].x,
+          y2: hexA.corners[1].y
+        };
+
+        const edgeMidX = (sharedEdgeCoords.x1 + sharedEdgeCoords.x2) / 2;
+        const edgeMidY = (sharedEdgeCoords.y1 + sharedEdgeCoords.y2) / 2;
+
+        // Place Kolkata City Pin inside Hex A just west of the shared edge
+        kolkataScreen = {
+          x: hexACenter.x + (edgeMidX - hexACenter.x) * 0.56,
+          y: hexACenter.y + (edgeMidY - hexACenter.y) * 0.56 - 0.8
+        };
+
+        // Place Open-Meteo Forecast Point inside Hex B just east of the shared edge (~4.52 km away)
+        forecastScreen = {
+          x: hexBCenter.x + (edgeMidX - hexBCenter.x) * 0.58,
+          y: hexBCenter.y + (edgeMidY - hexBCenter.y) * 0.58 + 0.6
+        };
+
+        // Set shared edge conflict line
+        const sharedEdgeEl = document.getElementById("sharedEdgeLine");
+        sharedEdgeEl.setAttribute("x1", sharedEdgeCoords.x1.toFixed(2));
+        sharedEdgeEl.setAttribute("y1", sharedEdgeCoords.y1.toFixed(2));
+        sharedEdgeEl.setAttribute("x2", sharedEdgeCoords.x2.toFixed(2));
+        sharedEdgeEl.setAttribute("y2", sharedEdgeCoords.y2.toFixed(2));
+
+        // Center K-ring wave on Hex B
+        const waveCircle = document.getElementById("kRingWaveCircle");
+        waveCircle.setAttribute("cx", hexBCenter.x.toFixed(2));
+        waveCircle.setAttribute("cy", hexBCenter.y.toFixed(2));
+
+        // Build curved geodesic arc between Kolkata Pin and Forecast Point
+        const midArcX = (kolkataScreen.x + forecastScreen.x) / 2;
+        const midArcY = (kolkataScreen.y + forecastScreen.y) / 2 - 4.2;
+        const arcD = `M ${kolkataScreen.x.toFixed(2)} ${kolkataScreen.y.toFixed(2)} Q ${midArcX.toFixed(2)} ${midArcY.toFixed(2)} ${forecastScreen.x.toFixed(2)} ${forecastScreen.y.toFixed(2)}`;
+        document.getElementById("geodesicArcGlow").setAttribute("d", arcD);
+        document.getElementById("geodesicArcPath").setAttribute("d", arcD);
+      }
+
+      function buildStage1CrossJoinLayer() {
+        const layer = document.getElementById("crossJoinLayer");
+        const kProj = projectOrtho(KOLKATA_LAT, KOLKATA_LON);
+
+        GLOBAL_TARGETS.forEach((t, idx) => {
+          const p = projectOrtho(t.lat, t.lon);
+          if (!p.visible) return;
+
+          // Curved great-circle-like quadratic arc across the sphere
+          const mx = (kProj.x + p.x) / 2;
+          const my = (kProj.y + p.y) / 2;
+          const dx = p.x - kProj.x;
+          const dy = p.y - kProj.y;
+          const dist = Math.hypot(dx, dy);
+          // Arch outward slightly toward sphere center or perpendicular for 3D arc feel
+          const nx = -dy / (dist || 1);
+          const ny = dx / (dist || 1);
+          const bulge = Math.min(34, dist * 0.16) * (idx % 2 === 0 ? 1 : -0.7);
+
+          const path = createSvgEl("path", {
+            d: `M ${kProj.x.toFixed(1)} ${kProj.y.toFixed(1)} Q ${(mx + nx * bulge).toFixed(1)} ${(my + ny * bulge).toFixed(1)} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`,
+            fill: "none",
+            stroke: idx % 3 === 0 ? "#fb7185" : "#f43f5e",
+            "stroke-width": idx % 4 === 0 ? "1.35" : "0.95",
+            "stroke-opacity": "0.68",
+            "stroke-dasharray": "4 3",
+            class: "beam-march"
+          });
+          path.style.animationDelay = `${-(idx * 0.13).toFixed(2)}s`;
+          layer.appendChild(path);
+
+          // Target Forecast Grid Dot
+          layer.appendChild(
+            createSvgEl("circle", {
+              cx: p.x.toFixed(1),
+              cy: p.y.toFixed(1),
+              r: "2.8",
+              fill: "#f59e0b",
+              stroke: "#0b1120",
+              "stroke-width": "0.8"
+            })
+          );
+        });
+      }
+
+      function buildLocalPins() {
+        const layer = document.getElementById("localPinsLayer");
+
+        // 1. Forecast Point (Open-Meteo Grid Node in Hex B)
+        const fcGroup = createSvgEl("g", {
+          id: "forecastPinGroup",
+          transform: `translate(${forecastScreen.x.toFixed(2)}, ${forecastScreen.y.toFixed(2)})`
+        });
+
+        fcGroup.appendChild(
+          createSvgEl("circle", {
+            r: "3.2",
+            fill: "none",
+            stroke: "#f59e0b",
+            "stroke-width": "0.7",
+            class: "pulse-ring"
+          })
+        );
+
+        // Diamond / Hex marker for Open-Meteo grid node
+        fcGroup.appendChild(
+          createSvgEl("polygon", {
+            points: "0,-2.4 2.1,-1.2 2.1,1.2 0,2.4 -2.1,1.2 -2.1,-1.2",
+            fill: "#f59e0b",
+            stroke: "#090e1a",
+            "stroke-width": "0.55"
+          })
+        );
+
+        // Compact Label for Forecast Point (visible when zoomed)
+        const fcLabel = createSvgEl("g", { id: "fcPinLabel", opacity: "0" });
+        fcLabel.appendChild(
+          createSvgEl("rect", {
+            x: "3.2",
+            y: "-4.8",
+            width: "28",
+            height: "9.2",
+            rx: "2",
+            fill: "rgba(9, 14, 26, 0.88)",
+            stroke: "#f59e0b",
+            "stroke-width": "0.4"
+          })
+        );
+        const fcTxt = createSvgEl("text", {
+          x: "5",
+          y: "1.3",
+          fill: "#fde68a",
+          "font-size": "4.2",
+          "font-weight": "700",
+          "font-family": "monospace"
+        });
+        fcTxt.textContent = "fc_grid (B)";
+        fcLabel.appendChild(fcTxt);
+        fcGroup.appendChild(fcLabel);
+
+        // 2. Kolkata City Pin (in Hex A)
+        const cityGroup = createSvgEl("g", {
+          id: "kolkataPinGroup",
+          transform: `translate(${kolkataScreen.x.toFixed(2)}, ${kolkataScreen.y.toFixed(2)})`
+        });
+
+        cityGroup.appendChild(
+          createSvgEl("circle", {
+            r: "4.5",
+            fill: "none",
+            stroke: "#22d3ee",
+            "stroke-width": "0.9",
+            class: "pulse-ring"
+          })
+        );
+
+        const pinBody = createSvgEl("g", { class: "pin-float" });
+        pinBody.appendChild(
+          createSvgEl("circle", {
+            r: "2.8",
+            fill: "#22d3ee",
+            stroke: "#090e1a",
+            "stroke-width": "0.65"
+          })
+        );
+        pinBody.appendChild(
+          createSvgEl("circle", {
+            r: "1.0",
+            fill: "#ffffff"
+          })
+        );
+        cityGroup.appendChild(pinBody);
+
+        // Compact Label for Kolkata City Pin
+        const cityLabel = createSvgEl("g", { id: "cityPinLabel" });
+        cityLabel.appendChild(
+          createSvgEl("rect", {
+            x: "-33",
+            y: "-5.2",
+            width: "29.5",
+            height: "9.5",
+            rx: "2",
+            fill: "rgba(9, 14, 26, 0.9)",
+            stroke: "#22d3ee",
+            "stroke-width": "0.45"
+          })
+        );
+        const cityTxt = createSvgEl("text", {
+          x: "-31",
+          y: "1.1",
+          fill: "#cffafe",
+          "font-size": "4.3",
+          "font-weight": "700",
+          "font-family": "sans-serif"
+        });
+        cityTxt.textContent = "Kolkata (A)";
+        cityLabel.appendChild(cityTxt);
+        cityGroup.appendChild(cityLabel);
+
+        layer.appendChild(fcGroup);
+        layer.appendChild(cityGroup);
+      }
+
+      /* ========================================================================
+         4. PYSPARK CODE PANEL RENDERING & HIGHLIGHTING
+         ======================================================================== */
+      function buildCodePanel() {
+        const container = document.getElementById("codeContainer");
+        CODE_LINES.forEach((line) => {
+          const row = document.createElement("div");
+          row.className = "code-line";
+          row.dataset.line = String(line.num);
+          if (line.stage > 0) {
+            row.dataset.stage = String(line.stage);
+            row.title = `Click to jump to Stage ${line.stage}`;
+            row.addEventListener("click", () => {
+              selectStage(line.stage, true);
+            });
+          }
+
+          const numSpan = document.createElement("span");
+          numSpan.className = "line-num";
+          numSpan.textContent = line.num;
+
+          const codeSpan = document.createElement("span");
+          codeSpan.className = "line-code";
+          codeSpan.innerHTML = line.html || " ";
+
+          row.appendChild(numSpan);
+          row.appendChild(codeSpan);
+          container.appendChild(row);
+        });
+      }
+
+      /* ========================================================================
+         5. STAGE STATE, CAMERA ANIMATION & VISUAL CHOREOGRAPHY
+         ======================================================================== */
+      let currentStage = 1;
+      let isPlaying = true;
+      let isAutoLoop = true;
+      let stageElapsedMs = 0;
+      let lastFrameTime = performance.now();
+      let manualZoomOverride = null; // null = follow stage default, or "global" / "regional"
+
+      // Camera interpolation state
+      let camScale = 1.0;
+      let camTx = 0.0;
+      let camTy = 0.0;
+      let targetCamScale = 1.0;
+      let targetCamTx = 0.0;
+      let targetCamTy = 0.0;
+
+      function updateTargetCamera() {
+        const mode = manualZoomOverride || STAGES[currentStage].zoomMode;
+        const scaleLabel = document.getElementById("hudViewScale");
+        const cityLabel = document.getElementById("cityPinLabel");
+        const fcLabel = document.getElementById("fcPinLabel");
+
+        if (mode === "global") {
+          targetCamScale = 1.0;
+          targetCamTx = 0.0;
+          targetCamTy = 0.0;
+          scaleLabel.textContent = "View: Global Earth (1.0x)";
+          // Enlarge global Kolkata badge slightly when at 1x zoom
+          cityLabel.setAttribute("transform", "scale(2.4) translate(2, -1)");
+          fcLabel.setAttribute("opacity", "0");
+        } else {
+          // Zoom 3.65x centered right onto the Kolkata (Hex A) <-> Forecast (Hex B) cluster
+          const focusX = (hexACenter.x + hexBCenter.x) / 2;
+          const focusY = (hexACenter.y + hexBCenter.y) / 2 + 6;
+          targetCamScale = 3.65;
+          targetCamTx = 450 - focusX * targetCamScale;
+          targetCamTy = 295 - focusY * targetCamScale;
+          scaleLabel.textContent = "View: Bengal Basin Zoom (3.65x)";
+          cityLabel.setAttribute("transform", "scale(1)");
+          fcLabel.setAttribute("opacity", "1");
+        }
+      }
+
+      function applyStageVisuals(stageNum) {
+        const cfg = STAGES[stageNum];
+
+        // 1. Update Stage Tabs UI
+        document.querySelectorAll(".stage-tab").forEach((tab) => {
+          const s = Number(tab.dataset.stage);
+          tab.classList.toggle("active", s === stageNum);
+          const bar = document.getElementById(`prog-${s}`);
+          if (s < stageNum) {
+            bar.style.width = "100%";
+          } else if (s > stageNum) {
+            bar.style.width = "0%";
+          }
+        });
+
+        // 2. Update Caption, Metrics & Code Panel Highlights
+        document.getElementById("stageCaption").innerHTML = cfg.caption;
+        document.getElementById("codeStageNote").innerHTML = cfg.codeNote;
+
+        const mPairs = document.getElementById("metricPairs");
+        const mJoin = document.getElementById("metricJoin");
+        const mCost = document.getElementById("metricCost");
+        mPairs.textContent = cfg.metrics.pairs[0];
+        mPairs.style.color = cfg.metrics.pairs[1];
+        mJoin.textContent = cfg.metrics.join[0];
+        mJoin.style.color = cfg.metrics.join[1];
+        mCost.textContent = cfg.metrics.cost[0];
+        mCost.style.color = cfg.metrics.cost[1];
+
+        const hlSet = new Set(cfg.highlightLines);
+        document.querySelectorAll(".code-line").forEach((row) => {
+          const ln = Number(row.dataset.line);
+          if (hlSet.has(ln)) {
+            row.classList.add("highlighted");
+            row.classList.remove("dimmed");
+            row.style.setProperty("--hl-bg", cfg.hlBg);
+            row.style.setProperty("--hl-border", cfg.hlBorder);
+          } else {
+            row.classList.remove("highlighted");
+            row.classList.add("dimmed");
+          }
+        });
+
+        // 3. Toggle SVG Stage Layers & HUD Overlays
+        const crossJoinLayer = document.getElementById("crossJoinLayer");
+        const borderConflictLayer = document.getElementById("borderConflictLayer");
+        const kRingWaveLayer = document.getElementById("kRingWaveLayer");
+        const geodesicArcLayer = document.getElementById("geodesicArcLayer");
+
+        const hud1 = document.getElementById("hudStage1");
+        const hud2 = document.getElementById("hudStage2");
+        const hud3 = document.getElementById("hudStage3");
+        const hud4 = document.getElementById("hudStage4");
+
+        crossJoinLayer.style.opacity = stageNum === 1 ? "1" : "0";
+        crossJoinLayer.style.transition = "opacity 0.45s ease";
+
+        borderConflictLayer.style.opacity = stageNum === 2 ? "1" : "0";
+        borderConflictLayer.style.transition = "opacity 0.35s ease";
+
+        kRingWaveLayer.style.opacity = stageNum === 3 ? "1" : "0";
+        kRingWaveLayer.style.transition = "opacity 0.35s ease";
+
+        geodesicArcLayer.style.opacity = stageNum === 4 ? "1" : "0";
+        geodesicArcLayer.style.transition = "opacity 0.4s ease";
+
+        hud1.setAttribute("opacity", stageNum === 1 ? "1" : "0");
+        hud2.setAttribute("opacity", stageNum === 2 ? "1" : "0");
+        hud3.setAttribute("opacity", stageNum === 3 ? "1" : "0");
+        hud4.setAttribute("opacity", stageNum === 4 ? "1" : "0");
+
+        // 4. Style H3 Hexagonal Mesh per Stage
+        hexRegistry.forEach((hex, key) => {
+          const el = hex.el;
+          el.classList.remove("hex-glow-pulse");
+
+          if (stageNum === 1) {
+            // Subtle background mesh during global crossJoin
+            el.setAttribute("fill", "rgba(56, 189, 248, 0.015)");
+            el.setAttribute("stroke", "rgba(56, 189, 248, 0.16)");
+            el.setAttribute("stroke-width", "0.4");
+          } else if (stageNum === 2) {
+            // Illuminate H3 grid; highlight Hex A (cyan) and Hex B (amber)
+            if (key === HEX_A_KEY) {
+              el.setAttribute("fill", "rgba(34, 211, 238, 0.32)");
+              el.setAttribute("stroke", "#22d3ee");
+              el.setAttribute("stroke-width", "0.95");
+            } else if (key === HEX_B_KEY) {
+              el.setAttribute("fill", "rgba(245, 158, 11, 0.32)");
+              el.setAttribute("stroke", "#f59e0b");
+              el.setAttribute("stroke-width", "0.95");
+            } else {
+              el.setAttribute("fill", "rgba(56, 189, 248, 0.045)");
+              el.setAttribute("stroke", "rgba(56, 189, 248, 0.34)");
+              el.setAttribute("stroke-width", "0.45");
+            }
+          } else if (stageNum === 3) {
+            // Expand K=1 ring (7 hexagons around Hex B) overlapping Hex A
+            if (key === HEX_A_KEY) {
+              // Overlapping cell covered by both cyan city.cell & amber K=1 ring!
+              el.setAttribute("fill", "rgba(34, 211, 238, 0.34)");
+              el.setAttribute("stroke", "#fbbf24");
+              el.setAttribute("stroke-width", "1.1");
+              el.classList.add("hex-glow-pulse");
+            } else if (key === HEX_B_KEY) {
+              el.setAttribute("fill", "rgba(245, 158, 11, 0.42)");
+              el.setAttribute("stroke", "#fbbf24");
+              el.setAttribute("stroke-width", "0.95");
+            } else if (K1_RING_KEYS.has(key)) {
+              el.setAttribute("fill", "rgba(245, 158, 11, 0.2)");
+              el.setAttribute("stroke", "#f59e0b");
+              el.setAttribute("stroke-width", "0.75");
+            } else {
+              el.setAttribute("fill", "rgba(56, 189, 248, 0.025)");
+              el.setAttribute("stroke", "rgba(56, 189, 248, 0.22)");
+              el.setAttribute("stroke-width", "0.38");
+            }
+          } else if (stageNum === 4) {
+            // Hash Join Match on Hex A (Emerald/Gold pulse), fade distant hexes
+            if (key === HEX_A_KEY) {
+              el.setAttribute("fill", "url(#matchHexGrad)");
+              el.setAttribute("stroke", "#10b981");
+              el.setAttribute("stroke-width", "1.25");
+              el.classList.add("hex-glow-pulse");
+            } else if (key === HEX_B_KEY) {
+              el.setAttribute("fill", "rgba(245, 158, 11, 0.16)");
+              el.setAttribute("stroke", "rgba(251, 191, 36, 0.65)");
+              el.setAttribute("stroke-width", "0.65");
+            } else {
+              el.setAttribute("fill", "rgba(56, 189, 248, 0.01)");
+              el.setAttribute("stroke", "rgba(56, 189, 248, 0.14)");
+              el.setAttribute("stroke-width", "0.32");
+            }
+          }
+        });
+
+        updateTargetCamera();
+      }
+
+      function selectStage(stageNum, userInitiated = false) {
+        currentStage = stageNum;
+        stageElapsedMs = 0;
+        manualZoomOverride = null;
+
+        // If user manually clicks a stage tab, turn off Auto-Play Loop so they can inspect freely
+        if (userInitiated && isAutoLoop) {
+          setAutoLoop(false);
+        }
+
+        applyStageVisuals(stageNum);
+      }
+
+      function setAutoLoop(enabled) {
+        isAutoLoop = enabled;
+        const toggle = document.getElementById("autoPlayToggle");
+        toggle.classList.toggle("active", enabled);
+        toggle.setAttribute("aria-checked", String(enabled));
+      }
+
+      function setPlaying(playing) {
+        isPlaying = playing;
+        const root = document.getElementById("appRoot");
+        const icon = document.getElementById("playPauseIcon");
+        const text = document.getElementById("playPauseText");
+
+        root.classList.toggle("paused", !playing);
+        if (playing) {
+          text.textContent = "Pause";
+          icon.innerHTML = `<rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/>`;
+        } else {
+          text.textContent = "Play";
+          icon.innerHTML = `<polygon points="3,2 14,8 3,14"/>`;
+        }
+      }
+
+      /* ========================================================================
+         6. MAIN ANIMATION LOOP (Camera Smooth Ease + Stage Progress + Wave)
+         ======================================================================== */
+      const globeCameraEl = document.getElementById("globeCamera");
+      const waveCircleEl = document.getElementById("kRingWaveCircle");
+      const counterTextEl = document.getElementById("crossJoinCounterText");
+
+      function tick(now) {
+        const dt = Math.min(100, now - lastFrameTime);
+        lastFrameTime = now;
+
+        // Smooth exponential damping for camera zoom & pan
+        const ease = 1 - Math.exp(-dt * 0.0065);
+        camScale += (targetCamScale - camScale) * ease;
+        camTx += (targetCamTx - camTx) * ease;
+        camTy += (targetCamTy - camTy) * ease;
+        globeCameraEl.setAttribute(
+          "transform",
+          `translate(${camTx.toFixed(2)}, ${camTy.toFixed(2)}) scale(${camScale.toFixed(4)})`
+        );
+
+        if (isPlaying) {
+          // Stage 1 subtle ticking pair counter animation
+          if (currentStage === 1) {
+            const frac = (now % 2400) / 2400;
+            const val = (2.42 + frac * 0.14).toFixed(2);
+            counterTextEl.textContent = `${val}B pairs — slow`;
+          }
+
+          // Stage 3 expanding K=1 radial ring pulse
+          if (currentStage === 3) {
+            const waveFrac = (now % 2000) / 2000;
+            const radius = 5 + waveFrac * 24;
+            waveCircleEl.setAttribute("r", radius.toFixed(2));
+            waveCircleEl.setAttribute("stroke-opacity", (0.85 * (1 - waveFrac)).toFixed(2));
+          }
+
+          // Auto-play progression across stages
+          if (isAutoLoop) {
+            stageElapsedMs += dt;
+            const pct = Math.min(100, (stageElapsedMs / STAGE_DURATION_MS) * 100);
+            const activeBar = document.getElementById(`prog-${currentStage}`);
+            if (activeBar) {
+              activeBar.style.width = `${pct.toFixed(1)}%`;
+            }
+
+            if (stageElapsedMs >= STAGE_DURATION_MS) {
+              const next = currentStage >= 4 ? 1 : currentStage + 1;
+              selectStage(next, false);
+            }
+          }
+        }
+
+        requestAnimationFrame(tick);
+      }
+
+      /* ========================================================================
+         7. EVENT LISTENERS & INITIALIZATION
+         ======================================================================== */
+      function showToast(msg) {
+        const toast = document.getElementById("toast");
+        toast.textContent = msg;
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 2200);
+      }
+
+      function init() {
+        buildStarfield();
+        buildGraticules();
+        buildContinents();
+        buildSphericalH3Mesh();
+        buildStage1CrossJoinLayer();
+        buildLocalPins();
+        buildCodePanel();
+
+        // Stage Tab Clicks
+        document.querySelectorAll(".stage-tab").forEach((tab) => {
+          tab.addEventListener("click", () => {
+            selectStage(Number(tab.dataset.stage), true);
+          });
+        });
+
+        // Auto-Play Toggle
+        const autoToggle = document.getElementById("autoPlayToggle");
+        autoToggle.addEventListener("click", () => {
+          setAutoLoop(!isAutoLoop);
+          if (isAutoLoop && !isPlaying) setPlaying(true);
+        });
+        autoToggle.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            autoToggle.click();
+          }
+        });
+
+        // Play / Pause Button
+        document.getElementById("playPauseBtn").addEventListener("click", () => {
+          setPlaying(!isPlaying);
+        });
+
+        // Next Stage Button
+        document.getElementById("nextStageBtn").addEventListener("click", () => {
+          const next = currentStage >= 4 ? 1 : currentStage + 1;
+          selectStage(next, false);
+        });
+
+        // Manual Camera Zoom Toggle
+        document.getElementById("cameraToggleBtn").addEventListener("click", () => {
+          const currentEffective = manualZoomOverride || STAGES[currentStage].zoomMode;
+          manualZoomOverride = currentEffective === "global" ? "regional" : "global";
+          updateTargetCamera();
+        });
+
+        // Copy PySpark Code Button (uses execCommand fallback for sandbox compatibility)
+        document.getElementById("copyCodeBtn").addEventListener("click", () => {
+          const textarea = document.createElement("textarea");
+          textarea.value = RAW_PYSPARK_TEXT;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand("copy");
+            showToast("Copied PySpark H3 snippet to clipboard!");
+          } catch (err) {
+            showToast("Press Ctrl+C / Cmd+C to copy selected code.");
+          }
+          document.body.removeChild(textarea);
+        });
+
+        // Start at Stage 1
+        applyStageVisuals(1);
+        requestAnimationFrame(tick);
+      }
+
+      window.addEventListener("DOMContentLoaded", init);
+    })();
+  </script>
+</body>
+</html>
